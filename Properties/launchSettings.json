@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "BaddieFs": {
+      "commandName": "Project",
+      "commandLineArgs": "-p C:/PassThrough -m Z:\r\n"
+    }
+  }
+}
