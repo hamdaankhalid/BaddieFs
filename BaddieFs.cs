@@ -99,8 +99,6 @@ namespace BaddieFs
                         case 'u':
                             argtos(Args, ref I, ref VolumePrefix);
                             break;
-                        case 't':
-                            argstol
                         default:
                             throw new CommandLineUsageException();
                     }
@@ -135,7 +133,7 @@ namespace BaddieFs
                     if (0 > FileSystemHost.SetDebugLogFile(DebugLogFile))
                         throw new CommandLineUsageException("cannot open debug log file");
 
-                Host = new FileSystemHost(new BaddieFs(PassThrough, TimeSpan.FromSeconds(30), 100, 1000));
+                Host = new FileSystemHost(new BaddieFs(PassThrough, TimeSpan.FromSeconds(30), 1000, 5000));
 
                 Host.Prefix = VolumePrefix;
                 if (0 > Host.Mount(MountPoint, null, true, DebugFlags))
