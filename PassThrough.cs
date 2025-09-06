@@ -17,11 +17,10 @@
  * ineffective any application of the GPLv3 license to this software,
  * notwithstanding of any reference thereto in the software or
  * associated repository.
+ * hkhalid:
  */
 
-using System;
 using System.Collections;
-using System.IO;
 using System.Runtime.InteropServices;
 using System.Security.AccessControl;
 
@@ -48,6 +47,9 @@ namespace BaddieFs.passthrough
             ThrowIoExceptionWithWin32((Int32)Win32FromNtStatus(Status));
         }
 
+        /*
+         * Kernel32 wrapper resources + Interop for passthrough to work
+        */
         protected class FileDesc
         {
             public FileStream Stream;
@@ -281,16 +283,20 @@ namespace BaddieFs.passthrough
         private static DirectoryEntryComparer _DirectoryEntryComparer =
             new DirectoryEntryComparer();
 
+        private String _MirrorPath;
+
         public Ptfs(String Path0)
         {
-            _Path = Path.GetFullPath(Path0);
-            if (_Path.EndsWith("\\"))
-                _Path = _Path.Substring(0, _Path.Length - 1);
+            _MirrorPath = Path.GetFullPath(Path0);
+            if (_MirrorPath.EndsWith("\\"))
+                _MirrorPath = _MirrorPath.Substring(0, _MirrorPath.Length - 1);
         }
+
         public String ConcatPath(String FileName)
         {
-            return _Path + FileName;
+            return _MirrorPath + FileName;
         }
+
         public override Int32 ExceptionHandler(Exception ex)
         {
             Int32 HResult = ex.HResult; /* needs Framework 4.5 */
@@ -298,6 +304,7 @@ namespace BaddieFs.passthrough
                 return NtStatusFromWin32((UInt32)HResult & 0xFFFF);
             return STATUS_UNEXPECTED_IO_ERROR;
         }
+
         public override Int32 Init(Object Host0)
         {
             FileSystemHost Host = (FileSystemHost)Host0;
@@ -312,17 +319,18 @@ namespace BaddieFs.passthrough
             Host.PostCleanupWhenModifiedOnly = true;
             Host.PassQueryDirectoryPattern = true;
             Host.FlushAndPurgeOnCleanup = true;
-            Host.VolumeCreationTime = (UInt64)File.GetCreationTimeUtc(_Path).ToFileTimeUtc();
+            Host.VolumeCreationTime = (UInt64)File.GetCreationTimeUtc(_MirrorPath).ToFileTimeUtc();
             Host.VolumeSerialNumber = 0;
             return STATUS_SUCCESS;
         }
+
         public override Int32 GetVolumeInfo(
             out VolumeInfo VolumeInfo)
         {
             VolumeInfo = default(VolumeInfo);
             try
             {
-                DriveInfo Info = new DriveInfo(_Path);
+                DriveInfo Info = new DriveInfo(_MirrorPath);
                 VolumeInfo.TotalSize = (UInt64)Info.TotalSize;
                 VolumeInfo.FreeSize = (UInt64)Info.TotalFreeSpace;
             }
@@ -335,6 +343,7 @@ namespace BaddieFs.passthrough
             }
             return STATUS_SUCCESS;
         }
+
         public override Int32 GetSecurityByName(
             String FileName,
             out UInt32 FileAttributes/* or ReparsePointIndex */,
@@ -347,6 +356,7 @@ namespace BaddieFs.passthrough
                 SecurityDescriptor = Info.GetAccessControl().GetSecurityDescriptorBinaryForm();
             return STATUS_SUCCESS;
         }
+
         public override Int32 Create(
             String FileName,
             UInt32 CreateOptions,
@@ -377,15 +387,19 @@ namespace BaddieFs.passthrough
                         (FileSystemRights)GrantedAccess | FileSystemRights.WriteAttributes,
                         AccessControlType.Allow));
 
-                    FileDesc = new FileDesc(
-                        new FileStream(
-                            path: FileName,
-                            mode: FileMode.CreateNew,
-                            access: (FileAccess)(FileSystemRights)GrantedAccess,
-                            share: FileShare.Read | FileShare.Write | FileShare.Delete,
-                            bufferSize: 4096));
+                    
+                    System.IO.FileInfo fileInfo = new System.IO.FileInfo(FileName);
+                    FileStream fileStream = FileSystemAclExtensions.Create(
+                            fileInfo,
+                            FileMode.CreateNew,
+                            (FileSystemRights)GrantedAccess,
+                            FileShare.Read | FileShare.Write | FileShare.Delete,
+                            4096,
+                            default,
+                            Security);
+
+                    FileDesc = new FileDesc(fileStream);
                     FileDesc.SetFileAttributes(FileAttributes | (UInt32)System.IO.FileAttributes.Archive);
-                    FileDesc.Stream.SetAccessControl(Security);
                 }
                 else
                 {
@@ -398,10 +412,7 @@ namespace BaddieFs.passthrough
                         Security.SetSecurityDescriptorBinaryForm(SecurityDescriptor);
                     }
 
-                    DirectoryInfo dirInfo = Directory.CreateDirectory(FileName);
-                    // damn I dont got permission for this?
-                    dirInfo.SetAccessControl(Security);
-
+                    DirectoryInfo dirInfo = FileSystemAclExtensions.CreateDirectory(Security, FileName);
                     FileDesc = new FileDesc(dirInfo);
                     FileDesc.SetFileAttributes(FileAttributes);
                 }
@@ -433,14 +444,16 @@ namespace BaddieFs.passthrough
                 FileName = ConcatPath(FileName);
                 if (!Directory.Exists(FileName))
                 {
-                    FileDesc = new FileDesc(
-                        new FileStream(
-                            FileName,
+                    System.IO.FileInfo fileInfo = new System.IO.FileInfo(FileName);
+                    FileStream fileStream = FileSystemAclExtensions.Create(
+                            fileInfo,
                             FileMode.Open,
-                            (FileAccess)(FileSystemRights)GrantedAccess,
+                            (FileSystemRights)GrantedAccess,
                             FileShare.Read | FileShare.Write | FileShare.Delete,
                             4096,
-                            0));
+                            default,
+                            null);
+                    FileDesc = new FileDesc(fileStream);
                 }
                 else
                 {
@@ -459,6 +472,7 @@ namespace BaddieFs.passthrough
                 throw;
             }
         }
+
         public override Int32 Overwrite(
             Object FileNode,
             Object FileDesc0,
@@ -477,6 +491,7 @@ namespace BaddieFs.passthrough
             FileDesc.Stream.SetLength(0);
             return FileDesc.GetFileInfo(out FileInfo);
         }
+
         public override void Cleanup(
             Object FileNode,
             Object FileDesc0,
@@ -491,6 +506,7 @@ namespace BaddieFs.passthrough
                     FileDesc.Stream.Dispose();
             }
         }
+
         public override void Close(
             Object FileNode,
             Object FileDesc0)
@@ -499,6 +515,7 @@ namespace BaddieFs.passthrough
             if (null != FileDesc.Stream)
                 FileDesc.Stream.Dispose();
         }
+
         public override Int32 Read(
             Object FileNode,
             Object FileDesc0,
@@ -548,6 +565,7 @@ namespace BaddieFs.passthrough
             PBytesTransferred = (UInt32)Bytes.Length;
             return FileDesc.GetFileInfo(out FileInfo);
         }
+
         public override Int32 Flush(
             Object FileNode,
             Object FileDesc0,
@@ -563,6 +581,7 @@ namespace BaddieFs.passthrough
             FileDesc.Stream.Flush(true);
             return FileDesc.GetFileInfo(out FileInfo);
         }
+
         public override Int32 GetFileInfo(
             Object FileNode,
             Object FileDesc0,
@@ -571,6 +590,7 @@ namespace BaddieFs.passthrough
             FileDesc FileDesc = (FileDesc)FileDesc0;
             return FileDesc.GetFileInfo(out FileInfo);
         }
+
         public override Int32 SetBasicInfo(
             Object FileNode,
             Object FileDesc0,
@@ -585,6 +605,7 @@ namespace BaddieFs.passthrough
             FileDesc.SetBasicInfo(FileAttributes, CreationTime, LastAccessTime, LastWriteTime);
             return FileDesc.GetFileInfo(out FileInfo);
         }
+
         public override Int32 SetFileSize(
             Object FileNode,
             Object FileDesc0,
@@ -604,6 +625,7 @@ namespace BaddieFs.passthrough
             }
             return FileDesc.GetFileInfo(out FileInfo);
         }
+
         public override Int32 CanDelete(
             Object FileNode,
             Object FileDesc0,
@@ -613,6 +635,7 @@ namespace BaddieFs.passthrough
             FileDesc.SetDisposition(false);
             return STATUS_SUCCESS;
         }
+
         public override Int32 Rename(
             Object FileNode,
             Object FileDesc0,
@@ -625,6 +648,7 @@ namespace BaddieFs.passthrough
             FileDesc.Rename(FileName, NewFileName, ReplaceIfExists);
             return STATUS_SUCCESS;
         }
+
         public override Int32 GetSecurity(
             Object FileNode,
             Object FileDesc0,
@@ -634,6 +658,7 @@ namespace BaddieFs.passthrough
             SecurityDescriptor = FileDesc.GetSecurityDescriptor();
             return STATUS_SUCCESS;
         }
+
         public override Int32 SetSecurity(
             Object FileNode,
             Object FileDesc0,
@@ -644,6 +669,7 @@ namespace BaddieFs.passthrough
             FileDesc.SetSecurityDescriptor(Sections, SecurityDescriptor);
             return STATUS_SUCCESS;
         }
+
         public override Boolean ReadDirectoryEntry(
             Object FileNode,
             Object FileDesc0,
@@ -705,7 +731,5 @@ namespace BaddieFs.passthrough
                 return false;
             }
         }
-
-        private String _Path;
     }
 }

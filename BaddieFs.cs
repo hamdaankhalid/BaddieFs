@@ -1,7 +1,5 @@
 ﻿using BaddieFs.passthrough;
 using Fsp;
-using Fsp.Interop;
-using System.Security.AccessControl;
 
 namespace BaddieFs
 {
@@ -12,7 +10,7 @@ namespace BaddieFs
     }
 
 
-    // Taken from PtfsService.cs in passthrough-dotnet
+    // Taken from PtfsService.cs in passthrough-dotnet and salvaged for my needs cutely
     class BaddieFsService : Service
     {
         private class CommandLineUsageException : Exception
@@ -25,7 +23,7 @@ namespace BaddieFs
             public bool HasMessage;
         }
 
-        private const String PROGNAME = "baddiefs-dotnet";
+        private const String PROGNAME = "baddiefs";
 
         public BaddieFsService() : base("BaddieFsService")
         {
@@ -103,7 +101,7 @@ namespace BaddieFs
                     if (0 > FileSystemHost.SetDebugLogFile(DebugLogFile))
                         throw new CommandLineUsageException("cannot open debug log file");
 
-                Host = new FileSystemHost(new BaddieFs("C://"));
+                Host = new FileSystemHost(new BaddieFs(PassThrough));
 
                 Host.Prefix = VolumePrefix;
                 if (0 > Host.Mount(MountPoint, null, true, DebugFlags))

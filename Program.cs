@@ -1,6 +1,4 @@
-﻿using Fsp;
-
-namespace BaddieFs
+﻿namespace BaddieFs
 {
     internal class Program
     {

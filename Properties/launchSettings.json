@@ -2,7 +2,7 @@
   "profiles": {
     "BaddieFs": {
       "commandName": "Project",
-      "commandLineArgs": "-p C:/PassThrough -m Z:\r\n"
+      "commandLineArgs": "-p C:/ZDrivedata -m Z:\r\n"
     }
   }
 }
