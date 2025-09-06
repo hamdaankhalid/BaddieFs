@@ -5,10 +5,42 @@ namespace BaddieFs
 {
     internal class BaddieFs : Ptfs 
     {
-        public BaddieFs(string mirrorDir) : base(mirrorDir)
-        {}
-    }
+        private readonly long _degradataionStartsAt;
 
+        private readonly int _minMs;
+
+        private readonly int _maxMs;
+
+        private readonly Random _rand = new Random();
+
+        public BaddieFs(string mirrorDir, TimeSpan timeSpan, int minDegradationMs, int maxDegradationMs) : base(mirrorDir)
+        {
+            _degradataionStartsAt = DateTime.Now.Add(timeSpan).Ticks;
+            _minMs = minDegradationMs;
+            _maxMs = maxDegradationMs;
+        }
+
+        // it's like a time bomb, but for file writes
+        public override Int32 Write(
+            Object FileNode,
+            Object FileDesc0,
+            IntPtr Buffer,
+            UInt64 Offset,
+            UInt32 Length,
+            Boolean WriteToEndOfFile,
+            Boolean ConstrainedIo,
+            out UInt32 PBytesTransferred,
+            out Fsp.Interop.FileInfo FileInfo)
+        {
+            if (DateTime.Now.Ticks > _degradataionStartsAt)
+            {
+                int sleepMs = _rand.Next(_minMs, _maxMs);
+                Thread.Sleep(sleepMs);
+            }
+
+            return base.Write(FileNode, FileDesc0, Buffer, Offset, Length, WriteToEndOfFile, ConstrainedIo, out PBytesTransferred, out FileInfo);
+        }
+    }
 
     // Taken from PtfsService.cs in passthrough-dotnet and salvaged for my needs cutely
     class BaddieFsService : Service
@@ -67,6 +99,8 @@ namespace BaddieFs
                         case 'u':
                             argtos(Args, ref I, ref VolumePrefix);
                             break;
+                        case 't':
+                            argstol
                         default:
                             throw new CommandLineUsageException();
                     }
@@ -101,7 +135,7 @@ namespace BaddieFs
                     if (0 > FileSystemHost.SetDebugLogFile(DebugLogFile))
                         throw new CommandLineUsageException("cannot open debug log file");
 
-                Host = new FileSystemHost(new BaddieFs(PassThrough));
+                Host = new FileSystemHost(new BaddieFs(PassThrough, TimeSpan.FromSeconds(30), 100, 1000));
 
                 Host.Prefix = VolumePrefix;
                 if (0 > Host.Mount(MountPoint, null, true, DebugFlags))
@@ -151,6 +185,7 @@ namespace BaddieFs
             else
                 throw new CommandLineUsageException();
         }
+
         private static void argtol(String[] Args, ref int I, ref UInt32 V)
         {
             Int32 R;
