@@ -1,9 +1,13 @@
 ﻿using BaddieFs.passthrough;
 using Fsp;
+using Fsp.Interop;
+using System.Collections.Concurrent;
+using System.Security.AccessControl;
 
 namespace BaddieFs
 {
-    internal class BaddieFs : Ptfs 
+
+    internal sealed class BaddieFs : Ptfs
     {
         private readonly long _degradataionStartsAt;
 
@@ -11,34 +15,223 @@ namespace BaddieFs
 
         private readonly int _maxMs;
 
-        private readonly Random _rand = new Random();
+        private readonly Random _rand = Random.Shared;
+
+        // Map methods to strings and store their count
+        private readonly ConcurrentDictionary<string, int> _operationalStats;
+        // used to create a quick copy of the stats for printing
+        private readonly object _statsLock = new Object();
+
+        #region method names
+        private const string METHOD_CAN_DELETE = "CanDelete";
+        private const string METHOD_CLEANUP = "Cleanup";
+        private const string METHOD_CLOSE = "Close";
+        private const string METHOD_CREATE = "Create";
+        private const string METHOD_EXCEPTION_HANDLER = "ExceptionHandler";
+        private const string METHOD_FLUSH = "Flush";
+        private const string METHOD_GET_FILE_INFO = "GetFileInfo";
+        private const string METHOD_GET_SECURITY = "GetSecurity";
+        private const string METHOD_GET_SECURITY_BY_NAME = "GetSecurityByName";
+        private const string METHOD_GET_VOLUME_INFO = "GetVolumeInfo";
+        private const string METHOD_INIT = "Init";
+        private const string METHOD_MOUNTED = "Mounted";
+        private const string METHOD_OPEN = "Open";
+        private const string METHOD_OVERWRITE = "Overwrite";
+        private const string METHOD_READ = "Read";
+        private const string METHOD_READ_DIRECTORY_ENTRY = "ReadDirectoryEntry";
+        private const string METHOD_RENAME = "Rename";
+        private const string METHOD_SET_BASIC_INFO = "SetBasicInfo";
+        private const string METHOD_SET_FILE_SIZE = "SetFileSize";
+        private const string METHOD_SET_SECURITY = "SetSecurity";
+        private const string METHOD_WRITE = "Write";
+        #endregion
 
         public BaddieFs(string mirrorDir, TimeSpan timeSpan, int minDegradationMs, int maxDegradationMs) : base(mirrorDir)
         {
             _degradataionStartsAt = DateTime.Now.Add(timeSpan).Ticks;
             _minMs = minDegradationMs;
             _maxMs = maxDegradationMs;
+            _operationalStats = new ConcurrentDictionary<string, int>();
         }
 
-        // it's like a time bomb, but for file writes
-        public override Int32 Write(
-            Object FileNode,
-            Object FileDesc0,
-            IntPtr Buffer,
-            UInt64 Offset,
-            UInt32 Length,
-            Boolean WriteToEndOfFile,
-            Boolean ConstrainedIo,
-            out UInt32 PBytesTransferred,
-            out Fsp.Interop.FileInfo FileInfo)
+        public override int Mounted(object Host)
+        {
+            PrintStatsPeriodically();
+            AddStat(METHOD_MOUNTED);
+            return 0;
+        }
+
+        private void AddStat(string methodName) => _operationalStats.AddOrUpdate(methodName, 1, (key, oldValue) => oldValue + 1);
+
+        private void PrintStatsPeriodically()
+        {
+            Task.Run(async () =>
+            {
+                while (true)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(30));
+                    // Copy the stats to avoid locking during printing
+                    ConcurrentDictionary<string, int> statsCopy;
+                    lock (_statsLock)
+                    {
+                        statsCopy = new ConcurrentDictionary<string, int>(_operationalStats);
+                    }
+
+                    Console.WriteLine($" ---- Operational Stats: {DateTime.Now} ----");
+                    foreach (var kvp in statsCopy)
+                    {
+                        Console.WriteLine($"{kvp.Key}: {kvp.Value}");
+                    }
+                    Console.WriteLine(" ----------------------------");
+                }
+            });
+        }
+
+        public override int CanDelete(object FileNode, object FileDesc, string FileName)
+        {
+            AddStat(METHOD_CAN_DELETE);
+            MaybeDegrade();
+            return base.CanDelete(FileNode, FileDesc, FileName);
+        }
+
+        public override void Cleanup(object FileNode, object FileDesc, string FileName, uint Flags)
+        {
+            AddStat(METHOD_CLEANUP);
+            MaybeDegrade();
+            base.Cleanup(FileNode, FileDesc, FileName, Flags);
+        }
+
+        public override void Close(object FileNode, object FileDesc)
+        {
+            AddStat(METHOD_CLOSE);
+            MaybeDegrade();
+            base.Close(FileNode, FileDesc);
+        }
+
+        public override int Create(string FileName, uint CreateOptions, uint GrantedAccess, uint FileAttributes, byte[] SecurityDescriptor, ulong AllocationSize, out object FileNode, out object FileDesc, out Fsp.Interop.FileInfo FileInfo, out string NormalizedName)
+        {
+            AddStat(METHOD_CREATE);
+            MaybeDegrade();
+            return base.Create(FileName, CreateOptions, GrantedAccess, FileAttributes, SecurityDescriptor, AllocationSize, out FileNode, out FileDesc, out FileInfo, out NormalizedName);
+        }
+
+        public override int ExceptionHandler(Exception ex)
+        {
+            AddStat(METHOD_EXCEPTION_HANDLER);
+            MaybeDegrade();
+            return base.ExceptionHandler(ex);
+        }
+
+        public override int Flush(object FileNode, object FileDesc, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_FLUSH);
+            MaybeDegrade();
+            return base.Flush(FileNode, FileDesc, out FileInfo);
+        }
+
+        public override int GetFileInfo(object FileNode, object FileDesc, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_GET_FILE_INFO);
+            MaybeDegrade();
+            return base.GetFileInfo(FileNode, FileDesc, out FileInfo);
+        }
+
+        public override int GetSecurity(object FileNode, object FileDesc, ref byte[] SecurityDescriptor)
+        {
+            AddStat(METHOD_GET_SECURITY);
+            MaybeDegrade();
+            return base.GetSecurity(FileNode, FileDesc, ref SecurityDescriptor);
+        }
+
+        public override int GetSecurityByName(string FileName, out uint FileAttributes, ref byte[] SecurityDescriptor)
+        {
+            AddStat(METHOD_GET_SECURITY_BY_NAME);
+            MaybeDegrade();
+            return base.GetSecurityByName(FileName, out FileAttributes, ref SecurityDescriptor);
+        }
+
+        public override int GetVolumeInfo(out VolumeInfo VolumeInfo)
+        {
+            AddStat(METHOD_GET_VOLUME_INFO);
+            MaybeDegrade();
+            return base.GetVolumeInfo(out VolumeInfo);
+        }
+
+        public override int Init(object Host)
+        {
+            AddStat(METHOD_INIT);
+            return base.Init(Host);
+        }
+
+        public override int Open(string FileName, uint CreateOptions, uint GrantedAccess, out object FileNode, out object FileDesc, out Fsp.Interop.FileInfo FileInfo, out string NormalizedName)
+        {
+            AddStat(METHOD_OPEN);
+            MaybeDegrade();
+            return base.Open(FileName, CreateOptions, GrantedAccess, out FileNode, out FileDesc, out FileInfo, out NormalizedName);
+        }
+
+        public override int Overwrite(object FileNode, object FileDesc, uint FileAttributes, bool ReplaceFileAttributes, ulong AllocationSize, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_OVERWRITE);
+            MaybeDegrade();
+            return base.Overwrite(FileNode, FileDesc, FileAttributes, ReplaceFileAttributes, AllocationSize, out FileInfo);
+        }
+
+        public override int Read(object FileNode, object FileDesc, nint Buffer, ulong Offset, uint Length, out uint BytesTransferred)
+        {
+            AddStat(METHOD_READ);
+            MaybeDegrade();
+            return base.Read(FileNode, FileDesc, Buffer, Offset, Length, out BytesTransferred);
+        }
+
+        public override bool ReadDirectoryEntry(object FileNode, object FileDesc, string Pattern, string Marker, ref object Context, out string FileName, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_READ_DIRECTORY_ENTRY);
+            MaybeDegrade();
+            return base.ReadDirectoryEntry(FileNode, FileDesc, Pattern, Marker, ref Context, out FileName, out FileInfo);
+        }
+
+        public override int Rename(object FileNode, object FileDesc, string FileName, string NewFileName, bool ReplaceIfExists)
+        {
+            AddStat(METHOD_RENAME);
+            MaybeDegrade();
+            return base.Rename(FileNode, FileDesc, FileName, NewFileName, ReplaceIfExists);
+        }
+
+        public override int SetBasicInfo(object FileNode, object FileDesc, uint FileAttributes, ulong CreationTime, ulong LastAccessTime, ulong LastWriteTime, ulong ChangeTime, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_SET_BASIC_INFO);
+            MaybeDegrade();
+            return base.SetBasicInfo(FileNode, FileDesc, FileAttributes, CreationTime, LastAccessTime, LastWriteTime, ChangeTime, out FileInfo);
+        }
+
+        public override int SetFileSize(object FileNode, object FileDesc, ulong NewSize, bool SetAllocationSize, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_SET_FILE_SIZE);
+            MaybeDegrade();
+            return base.SetFileSize(FileNode, FileDesc, NewSize, SetAllocationSize, out FileInfo);
+        }
+
+        public override int SetSecurity(object FileNode, object FileDesc, AccessControlSections Sections, byte[] SecurityDescriptor)
+        {
+            AddStat(METHOD_SET_SECURITY);
+            return base.SetSecurity(FileNode, FileDesc, Sections, SecurityDescriptor);
+        }
+
+        public override int Write(object FileNode, object FileDesc, nint Buffer, ulong Offset, uint Length, bool WriteToEndOfFile, bool ConstrainedIo, out uint BytesTransferred, out Fsp.Interop.FileInfo FileInfo)
+        {
+            AddStat(METHOD_WRITE);
+            MaybeDegrade();
+            return base.Write(FileNode, FileDesc, Buffer, Offset, Length, WriteToEndOfFile, ConstrainedIo, out BytesTransferred, out FileInfo);
+        }
+
+        private void MaybeDegrade()
         {
             if (DateTime.Now.Ticks > _degradataionStartsAt)
             {
-                int sleepMs = _rand.Next(_minMs, _maxMs);
-                Thread.Sleep(sleepMs);
+                int delay = _rand.Next(_minMs, _maxMs);
+                Thread.Sleep(delay);
             }
-
-            return base.Write(FileNode, FileDesc0, Buffer, Offset, Length, WriteToEndOfFile, ConstrainedIo, out PBytesTransferred, out FileInfo);
         }
     }
 
@@ -133,7 +326,7 @@ namespace BaddieFs
                     if (0 > FileSystemHost.SetDebugLogFile(DebugLogFile))
                         throw new CommandLineUsageException("cannot open debug log file");
 
-                Host = new FileSystemHost(new BaddieFs(PassThrough, TimeSpan.FromSeconds(30), 1000, 5000));
+                Host = new FileSystemHost(new BaddieFs(PassThrough, TimeSpan.FromHours(120), 5_000, 10_000));
 
                 Host.Prefix = VolumePrefix;
                 if (0 > Host.Mount(MountPoint, null, true, DebugFlags))
